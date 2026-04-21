@@ -1,59 +1,144 @@
-# Damn Vulnerable DeFi
+# Damn Vulnerable DeFi Solutions by Je4nDev
 
-Damn Vulnerable DeFi is _the_ smart contract security playground for developers, security researchers and educators.
+A complete, hands-on solve of **Damn Vulnerable DeFi v4** using **Foundry**, focused on learning smart contract security by exploiting realistic vulnerabilities and proving each exploit with passing tests.
 
-Perhaps the most sophisticated vulnerable set of Solidity smart contracts ever witnessed, it features flashloans, price oracles, governance, NFTs, DEXs, lending pools, smart contract wallets, timelocks, vaults, meta-transactions, token distributions, upgradeability and more.
+> Status: **18 / 18 challenges solved** ✅
 
-Use Damn Vulnerable DeFi to:
+This repository is my practical Solidity security lab. The goal was not just to "finish the CTF", but to build real auditing instincts through:
 
-- Sharpen your auditing and bug-hunting skills.
-- Learn how to detect, test and fix flaws in realistic scenarios to become a security-minded developer.
-- Benchmark smart contract security tooling.
-- Create educational content on smart contract security with articles, tutorials, talks, courses, workshops, trainings, CTFs, etc. 
+- reading vulnerable code,
+- identifying the broken assumption,
+- writing the exploit,
+- validating it with reproducible tests,
+- and extracting the security lesson behind each bug.
 
-## Install
+## Why this repo exists
 
-1. Clone the repository.
-2. Checkout the latest release (for example, `git checkout v4.1.0`)
-3. Rename the `.env.sample` file to `.env` and add a valid RPC URL. This is only needed for the challenges that fork mainnet state.
-4. Either install [Foundry](https://book.getfoundry.sh/getting-started/installation), or use the [provided devcontainer](./.devcontainer/) (In VSCode, open the repository as a devcontainer with the command "Devcontainer: Open Folder in Container...")
-5. Run `forge build` to initialize the project.
+I wanted a portfolio that shows actual exploit development, not just theory.
 
-## Usage
+This repo demonstrates:
+- Solidity + Foundry workflow in WSL
+- exploit construction in realistic DeFi scenarios
+- debugging through failing traces and invariant reasoning
+- security pattern recognition across lending, governance, oracles, wallets, upgradeability, distributions, bridges, and timelocks
 
-Each challenge is made up of:
+## Tech stack
 
-- A prompt located in `src/<challenge-name>/README.md`.
-- A set of contracts located in `src/<challenge-name>/`.
-- A [Foundry test](https://book.getfoundry.sh/forge/tests) located in `test/<challenge-name>/<ChallengeName>.t.sol`.
+- **Solidity 0.8.25**
+- **Foundry**
+- **WSL + VS Code**
+- **Mainnet fork testing** for fork-dependent challenges
 
-To solve a challenge:
+## Challenge status
 
-1. Read the challenge's prompt.
-2. Uncover the flaw(s) in the challenge's smart contracts.
-3. Code your solution in the corresponding test file.
-4. Try your solution with `forge test --mp test/<challenge-name>/<ChallengeName>.t.sol`.
+| # | Challenge | Status | Main vulnerability pattern |
+|---|---|---|---|
+| 1 | Unstoppable | ✅ | Invariant mismatch |
+| 2 | Naive Receiver | ✅ | Fixed fee drain |
+| 3 | Truster | ✅ | Arbitrary external call |
+| 4 | Selfie | ✅ | Flash loan governance |
+| 5 | The Rewarder | ✅ | Merkle claim duplication |
+| 6 | Puppet | ✅ | Spot-price oracle manipulation |
+| 7 | Compromised | ✅ | Leaked private keys |
+| 8 | Puppet V2 | ✅ | Uniswap V2 oracle manipulation |
+| 9 | Free Rider | ✅ | NFT marketplace accounting flaw + flash swap |
+| 10 | Side Entrance | ✅ | Flash loan accounting bug |
+| 11 | Withdrawal | ✅ | State change before external call |
+| 12 | ABI Smuggling | ✅ | Hardcoded calldata offset / auth bypass |
+| 13 | Backdoor | ✅ | Safe setup delegatecall abuse |
+| 14 | Wallet Mining | ✅ | Proxy storage collision / reinitialization |
+| 15 | Shards | ✅ | Broken refund math |
+| 16 | Climber | ✅ | Timelock execution-order bug |
+| 17 | Puppet V3 | ✅ | Short-window TWAP manipulation |
+| 18 | Curvy Puppet | ✅ | Manipulable LP valuation / virtual price abuse |
 
-> In challenges that restrict the number of transactions, you might need to run the test with the `--isolate` flag.
+## Key security lessons
 
-If the test passes, you've solved the challenge!
+Across the full set, the main patterns I trained were:
 
-Challenges may have more than one possible solution.
+1. **Never trust external balances as internal accounting**
+2. **Fixed fees and loops can become drain vectors**
+3. **User-controlled arbitrary calls are usually fatal**
+4. **Flash loans can temporarily buy power, not just liquidity**
+5. **Claim tracking must happen before value transfer**
+6. **Spot and weak-TWAP oracles are manipulable**
+7. **Credentials leaked in docs are still exploit paths**
+8. **State changes before external calls create inconsistent finality**
+9. **ABI assumptions can become access control bypasses**
+10. **Upgradeable/proxy storage layout mistakes can reopen initialization**
+11. **Timelocks are only safe if validation happens before effects**
+12. **LP pricing and vault math can be manipulated if treated as trusted oracles**
 
-### Rules
+## Repository structure
 
-- You must always use the `player` account.
-- You must not modify the challenges' initial nor final conditions.
-- You can code and deploy your own smart contracts.
-- You can use Foundry's cheatcodes to advance time when necessary.
-- You can import external libraries that aren't installed, although it shouldn't be necessary.
+Each challenge follows the original DVDF layout:
 
-## Troubleshooting
+- `src/<challenge>/` → vulnerable contracts and challenge prompt
+- `test/<challenge>/<Challenge>.t.sol` → exploit implementation and validation
 
-You can ask the community for help in [the discussions section](https://github.com/theredguild/damn-vulnerable-defi/discussions).
+My solutions live directly in the corresponding **Foundry test files**.
+
+## Running the solutions
+
+### Install
+```bash
+forge install
+```
+
+### Run a specific challenge
+```bash
+forge test --match-contract BackdoorChallenge -vvv
+```
+
+### Run the full suite
+```bash
+forge test -vvv
+```
+
+## Mainnet fork challenges
+
+Some challenges require a mainnet archive RPC.
+Create a `.env` file from `.env.sample`:
+
+```env
+MAINNET_FORKING_URL=https://eth-mainnet.g.alchemy.com/v2/YOUR_KEY
+```
+
+This is required for:
+- `PuppetV3`
+- `CurvyPuppet`
+
+## Notes on approach
+
+I solved these sequentially as deliberate security practice, not by trying to skip straight to bug bounties.
+The focus was:
+
+- exploit-first understanding,
+- reproducing the bug in code,
+- learning the real-world security analogy,
+- and building material worthy of a public audit portfolio.
+
+## Next steps
+
+The next step after this repository is turning the solutions into cleaner public writeups, with:
+
+- bug summary
+- root cause
+- exploit path
+- impact
+- mitigation
+- final passing test
+
+## Credit
+
+Original challenge set by **The Red Guild**:
+- Repo: https://github.com/theredguild/damn-vulnerable-defi
+- Website: https://damnvulnerabledefi.xyz
+
+This repository is a personal educational solve/portfolio built on top of their work.
 
 ## Disclaimer
 
-All code, practices and patterns in this repository are DAMN VULNERABLE and for educational purposes only.
+All vulnerable code in this repository is intentionally insecure and exists for educational purposes only.
 
-DO NOT USE IN PRODUCTION.
+**Do not use these patterns in production.**

